@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wayback Browser - Afera</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <img src="assets/logo.png" alt="Logo" class="logo-img">
+        <div class="logo-title">
+          <span class="logo-text">Wayback Browser</span>
+          <span class="logo-credit">by Afera</span>
+        </div>
+      </div>
+      <div class="search-box">
+        <input type="text" id="domainInput" placeholder="Enter domain (e.g., example.com)" autocomplete="off">
+        <button id="searchBtn" onclick="searchDomain()">
+          Search
+        </button>
+      </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar" id="tabBar">
+      <div class="tab active" data-tab="main" onclick="switchTab('main')">
+        Home
+      </div>
+      <!-- Dynamic tabs akan ditambah di sini -->
+      <button class="new-tab-btn" onclick="closeAllTabs()">x Close All</button>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar" id="statsBar" style="display: none;">
+      <div class="stat-item">
+        <span class="stat-label">Total Snapshots:</span>
+        <span class="stat-value" id="totalSnapshots">0</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">First Seen:</span>
+        <span class="stat-value" id="firstSeen">-</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Last Seen:</span>
+        <span class="stat-value" id="lastSeen">-</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Years Active:</span>
+        <span class="stat-value" id="yearsActive">-</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">Source:</span>
+        <span class="stat-value" id="sourceIndicator">-</span>
+      </div>
+    </div>
+
+    <!-- Preview Container (untuk webview tabs) - HARUS di luar main-content -->
+    <div class="preview-container" id="previewContainer" style="display: none;">
+      <div class="preview-toolbar">
+        <span class="preview-url" id="previewUrl"></span>
+        <div class="preview-actions">
+          <button onclick="reloadPreview()">Reload</button>
+          <button onclick="openExternal()">Open in Browser</button>
+          <button onclick="closePreview()">Close</button>
+        </div>
+      </div>
+
+      <div class="preview-wrapper">
+        <!-- Loading Overlay -->
+        <div class="preview-overlay" id="previewOverlay">
+          <div class="preview-loading">
+            <div class="spinner"></div>
+            <p id="previewStatus">Loading snapshot...</p>
+            <p class="preview-hint">This may take a while depending on Wayback Machine server</p>
+            <div class="preview-progress">
+              <div class="preview-progress-bar"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Error Overlay -->
+        <div class="preview-overlay preview-error" id="previewError" style="display: none;">
+          <div class="error-content">
+            <span class="error-icon">[X]</span>
+            <h3>Failed to Load</h3>
+            <p id="errorDetail">Snapshot could not be loaded</p>
+            <div class="error-actions">
+              <button onclick="reloadPreview()">Try Again</button>
+              <button onclick="openExternal()">Open in Browser</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Webview -->
+        <webview id="previewWebview" class="preview-webview"></webview>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Welcome Screen -->
+      <div class="welcome-screen" id="welcomeScreen">
+        <div class="welcome-logo">
+          <img src="assets/logo.png" alt="Logo">
+        </div>
+        <h2>Welcome to Wayback Browser</h2>
+        <p class="welcome-subtitle">by Afera</p>
+        <p>Enter a domain above to explore its history on the Wayback Machine</p>
+        <div class="features">
+          <div class="feature">
+            <span class="feature-icon">~</span>
+            <p>Fast API</p>
+          </div>
+          <div class="feature">
+            <span class="feature-icon">#</span>
+            <p>Calendar</p>
+          </div>
+          <div class="feature">
+            <span class="feature-icon">&gt;</span>
+            <p>Quick Open</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading Screen -->
+      <div class="loading-screen" id="loadingScreen" style="display: none;">
+        <div class="spinner"></div>
+        <p id="loadingText">Fetching snapshots...</p>
+        <div id="loadingStatus" class="loading-status"></div>
+        <p class="loading-timer" id="loadingTimer">0s</p>
+        <div class="loading-slow-warning" id="loadingSlowWarning" style="display: none;">
+          <p>Taking longer than expected...</p>
+          <div class="slow-warning-actions">
+            <button onclick="cancelFetch()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Results Screen -->
+      <div class="results-screen" id="resultsScreen" style="display: none;">
+        <!-- Year Tabs -->
+        <div class="year-tabs" id="yearTabs"></div>
+
+        <!-- Calendar & List Container -->
+        <div class="content-container">
+          <!-- Calendar View -->
+          <div class="calendar-section">
+            <h3><span id="calendarTitle">Select a Year</span></h3>
+            <div class="month-grid" id="monthGrid"></div>
+          </div>
+
+          <!-- Snapshots List -->
+          <div class="snapshots-section">
+            <h3>Snapshots <span id="snapshotCount"></span></h3>
+            <div class="snapshots-list" id="snapshotsList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Screen -->
+      <div class="error-screen" id="errorScreen" style="display: none;">
+        <div class="error-icon">[X]</div>
+        <h3>No Snapshots Found</h3>
+        <p id="errorMessage">This domain has no archived snapshots.</p>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>Data from <a href="https://web.archive.org" target="_blank">Wayback Machine</a> | <a href="https://timetravel.mementoweb.org" target="_blank">Memento</a> | <a href="https://archive.today" target="_blank">Archive.today</a></span>
+      <span class="footer-credit">Wayback Browser by Afera</span>
+      <span id="statusText">Ready</span>
+    </footer>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
