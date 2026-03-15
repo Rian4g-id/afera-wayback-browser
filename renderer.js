@@ -3,22 +3,16 @@ const { ipcRenderer } = require('electron');
 // Source configurations
 const SOURCES = {
   wayback: {
-    name: 'Wayback Machine',
+    name: 'Wayback CDX',
     short: 'WB',
     color: '#00d4ff',
     timeout: 15000
   },
-  memento: {
-    name: 'Memento Time Travel',
-    short: 'ME',
+  timemap: {
+    name: 'Wayback Timemap',
+    short: 'TM',
     color: '#ffc800',
-    timeout: 10000
-  },
-  archivetoday: {
-    name: 'Archive.today',
-    short: 'AT',
-    color: '#ff6b6b',
-    timeout: 10000
+    timeout: 15000
   }
 };
 
@@ -136,7 +130,7 @@ async function searchDomain() {
   }
 }
 
-// Fallback fetch: Wayback -> Memento -> Archive.today
+// Fallback fetch: Wayback CDX -> Wayback Timemap
 async function fetchWithFallback(domain) {
   // Check cache first
   if (snapshotCache[domain]) {
@@ -144,43 +138,45 @@ async function fetchWithFallback(domain) {
     return snapshotCache[domain];
   }
 
-  const sources = ['wayback', 'memento', 'archivetoday'];
-
-  for (const source of sources) {
-    try {
-      updateLoadingStatus(source, 'loading');
-
-      let snapshots;
-      if (source === 'wayback') {
-        snapshots = await fetchWayback(domain);
-      } else if (source === 'memento') {
-        snapshots = await fetchMemento(domain);
-      } else if (source === 'archivetoday') {
-        snapshots = await fetchArchiveToday(domain);
-      }
-
-      if (snapshots && snapshots.length > 0) {
-        updateLoadingStatus(source, 'success');
-        const result = { snapshots, source };
-        snapshotCache[domain] = result;
-        return result;
-      } else {
-        updateLoadingStatus(source, 'empty');
-      }
-
-    } catch (error) {
-      console.log(`${source} failed:`, error.message);
-
-      // If user cancelled, stop immediately
-      if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
-        throw error;
-      }
-
-      updateLoadingStatus(source, 'failed');
+  // Source 1: Wayback CDX API (primary)
+  updateLoadingStatus('wayback', 'loading');
+  try {
+    const snapshots = await fetchWaybackCDX(domain);
+    if (snapshots && snapshots.length > 0) {
+      updateLoadingStatus('wayback', 'success');
+      const result = { snapshots, source: 'wayback' };
+      snapshotCache[domain] = result;
+      return result;
     }
+    updateLoadingStatus('wayback', 'empty');
+  } catch (error) {
+    console.error('CDX failed:', error.message);
+    if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
+      throw error;
+    }
+    updateLoadingStatus('wayback', 'failed');
   }
 
-  throw new Error('All sources failed');
+  // Source 2: Wayback Timemap API (fallback)
+  updateLoadingStatus('timemap', 'loading');
+  try {
+    const snapshots = await fetchWaybackTimemap(domain);
+    if (snapshots && snapshots.length > 0) {
+      updateLoadingStatus('timemap', 'success');
+      const result = { snapshots, source: 'timemap' };
+      snapshotCache[domain] = result;
+      return result;
+    }
+    updateLoadingStatus('timemap', 'empty');
+  } catch (error) {
+    console.error('Timemap failed:', error.message);
+    if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
+      throw error;
+    }
+    updateLoadingStatus('timemap', 'failed');
+  }
+
+  throw new Error('All archive sources failed. Please try again later.');
 }
 
 // Fetch with timeout helper
@@ -206,12 +202,12 @@ async function fetchWithTimeout(url, timeout) {
   }
 }
 
-// Fetch from Wayback Machine CDX API
-async function fetchWayback(domain) {
+// Fetch from Wayback Machine CDX API (primary)
+async function fetchWaybackCDX(domain) {
   const url = `https://web.archive.org/cdx/search/cdx?url=${domain}&output=json&limit=10000`;
   const response = await fetchWithTimeout(url, SOURCES.wayback.timeout);
 
-  if (!response.ok) throw new Error(`Wayback HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`CDX error: ${response.status}`);
 
   const data = await response.json();
   if (data.length <= 1) return [];
@@ -225,56 +221,49 @@ async function fetchWayback(domain) {
   }));
 }
 
-// Fetch from Memento Time Travel (uses Wayback timemap JSON endpoint)
-async function fetchMemento(domain) {
+// Fetch from Wayback Timemap API (fallback)
+async function fetchWaybackTimemap(domain) {
   const url = `https://web.archive.org/web/timemap/json/${domain}`;
-  const response = await fetchWithTimeout(url, SOURCES.memento.timeout);
+  const response = await fetchWithTimeout(url, SOURCES.timemap.timeout);
 
-  if (!response.ok) throw new Error(`Memento HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Timemap error: ${response.status}`);
 
   const data = await response.json();
   if (!data || data.length <= 1) return [];
 
-  return data.slice(1).map(row => ({
-    timestamp: row[1],
-    originalUrl: row[2],
-    url: `https://web.archive.org/web/${row[1]}/${row[2]}`,
-    statusCode: row[4] || '200',
-    source: 'memento'
-  }));
-}
-
-// Fetch from Archive.today
-async function fetchArchiveToday(domain) {
-  const url = `https://archive.today/timemap/${domain}`;
-  const response = await fetchWithTimeout(url, SOURCES.archivetoday.timeout);
-
-  if (!response.ok) return [];
-
-  const text = await response.text();
   const snapshots = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (!row || row.length < 2) continue;
 
-  const regex = /https:\/\/archive\.(today|is|ph|md|vn|fo|li)\/(\w+)/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const archiveId = match[2];
-    // Try to extract date from context
-    const surrounding = text.substring(Math.max(0, match.index - 50), match.index + match[0].length + 50);
-    const dateMatch = surrounding.match(/(\d{4}-\d{2}-\d{2})/);
-    let timestamp;
-    if (dateMatch) {
-      timestamp = dateMatch[1].replace(/-/g, '') + '000000';
-    } else {
-      timestamp = archiveId.length >= 8 ? archiveId : archiveId + '000000';
+    // Find timestamp (14-digit number)
+    let timestamp = null;
+    let statusCode = '200';
+
+    for (const field of row) {
+      if (typeof field === 'string' && /^\d{14}$/.test(field)) {
+        timestamp = field;
+        break;
+      }
     }
 
-    snapshots.push({
-      timestamp: timestamp.padEnd(14, '0'),
-      originalUrl: domain,
-      url: match[0],
-      statusCode: '200',
-      source: 'archivetoday'
-    });
+    // Find status code if present
+    for (const field of row) {
+      if (typeof field === 'string' && /^[2-5]\d{2}$/.test(field)) {
+        statusCode = field;
+        break;
+      }
+    }
+
+    if (timestamp) {
+      snapshots.push({
+        timestamp: timestamp,
+        originalUrl: domain,
+        url: `https://web.archive.org/web/${timestamp}/${domain}`,
+        statusCode: statusCode,
+        source: 'timemap'
+      });
+    }
   }
 
   return snapshots;
@@ -283,6 +272,8 @@ async function fetchArchiveToday(domain) {
 // Update loading status UI during fallback
 function updateLoadingStatus(source, status) {
   const info = SOURCES[source];
+  if (!info) return;
+
   const statusEl = document.getElementById('loadingStatus');
   const loadingText = document.getElementById('loadingText');
 
@@ -555,8 +546,7 @@ function openPreview(url, date) {
   // Show loading, hide error
   showPreviewLoading(true);
   showPreviewError(false);
-  const isArchiveToday = url.includes('archive.today') || url.includes('archive.is') || url.includes('archive.ph');
-  updatePreviewStatus(isArchiveToday ? 'Connecting to Archive.today...' : 'Connecting to Wayback Machine...');
+  updatePreviewStatus('Connecting to Wayback Machine...');
 
   const webview = document.getElementById('previewWebview');
   webview.src = url;

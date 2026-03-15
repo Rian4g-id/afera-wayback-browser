@@ -546,16 +546,10 @@ body {
   border: 1px solid rgba(0, 212, 255, 0.3);
 }
 
-.source-indicator.me {
+.source-indicator.tm {
   background: rgba(255, 200, 0, 0.15);
   color: #ffc800;
   border: 1px solid rgba(255, 200, 0, 0.3);
-}
-
-.source-indicator.at {
-  background: rgba(255, 107, 107, 0.15);
-  color: #ff6b6b;
-  border: 1px solid rgba(255, 107, 107, 0.3);
 }
 
 .snapshot-status {
