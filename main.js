@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain, Menu, dialog } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
@@ -69,56 +69,52 @@ function checkForUpdates() {
   autoUpdater.checkForUpdates();
 }
 
+// Send update status to renderer
+function sendUpdateStatus(status, data = {}) {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('update-status', { status, ...data });
+  }
+}
+
 // Event: Update available
 autoUpdater.on('update-available', (info) => {
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: 'Update Available',
-    message: `Version ${info.version} is available!`,
-    detail: 'Do you want to download it now?',
-    buttons: ['Download', 'Later'],
-    defaultId: 0
-  }).then((result) => {
-    if (result.response === 0) {
-      autoUpdater.downloadUpdate();
-
-      // Show download progress in title
-      mainWindow.setTitle('Afera Wayback Browser - Downloading update...');
-    }
-  });
+  sendUpdateStatus('available', { version: info.version });
 });
 
 // Event: Update not available
 autoUpdater.on('update-not-available', () => {
-  // Silent - no notification needed
+  sendUpdateStatus('not-available');
 });
 
 // Event: Download progress
 autoUpdater.on('download-progress', (progress) => {
-  mainWindow.setTitle(`Afera Wayback Browser - Downloading: ${Math.round(progress.percent)}%`);
+  sendUpdateStatus('downloading', { percent: Math.round(progress.percent) });
 });
 
 // Event: Update downloaded
 autoUpdater.on('update-downloaded', (info) => {
-  mainWindow.setTitle('Afera Wayback Browser');
-
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: 'Update Ready',
-    message: 'Update downloaded!',
-    detail: 'The application will restart to install the update.',
-    buttons: ['Restart Now', 'Later'],
-    defaultId: 0
-  }).then((result) => {
-    if (result.response === 0) {
-      autoUpdater.quitAndInstall();
-    }
-  });
+  sendUpdateStatus('downloaded', { version: info.version });
 });
 
 // Event: Error
 autoUpdater.on('error', (error) => {
   console.error('Auto-update error:', error);
+  sendUpdateStatus('error', { message: error.message });
+});
+
+// IPC: User wants to download update
+ipcMain.on('update-download', () => {
+  autoUpdater.downloadUpdate();
+});
+
+// IPC: User wants to install update (restart)
+ipcMain.on('update-install', () => {
+  autoUpdater.quitAndInstall();
+});
+
+// IPC: User wants to check for updates manually
+ipcMain.on('update-check', () => {
+  autoUpdater.checkForUpdates();
 });
 
 // ==================== END AUTO-UPDATE ====================

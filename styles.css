@@ -107,6 +107,102 @@ body {
   box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
 }
 
+/* Update Banner */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  white-space: nowrap;
+  margin-left: 15px;
+}
+
+.update-banner.available {
+  background: rgba(0, 212, 255, 0.15);
+  border: 1px solid rgba(0, 212, 255, 0.4);
+}
+
+.update-banner.downloading {
+  background: rgba(255, 200, 0, 0.15);
+  border: 1px solid rgba(255, 200, 0, 0.4);
+}
+
+.update-banner.downloaded {
+  background: rgba(0, 255, 100, 0.15);
+  border: 1px solid rgba(0, 255, 100, 0.4);
+}
+
+.update-banner.error {
+  background: rgba(255, 107, 107, 0.15);
+  border: 1px solid rgba(255, 107, 107, 0.4);
+}
+
+.update-text {
+  color: #eee;
+  font-weight: 500;
+}
+
+.update-btn {
+  padding: 4px 14px;
+  border: none;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.update-banner.available .update-btn {
+  background: #00d4ff;
+  color: #111;
+}
+
+.update-banner.downloaded .update-btn {
+  background: #00ff64;
+  color: #111;
+}
+
+.update-banner.error .update-btn {
+  background: rgba(255, 255, 255, 0.2);
+  color: #eee;
+}
+
+.update-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+
+.update-dismiss {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.update-dismiss:hover {
+  color: #fff;
+}
+
+.update-progress {
+  width: 80px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #ffc800, #00d4ff);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
 /* Stats Bar */
 .stats-bar {
   display: flex;

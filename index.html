@@ -23,6 +23,14 @@
           Search
         </button>
       </div>
+      <div class="update-banner" id="updateBanner" style="display: none;">
+        <span class="update-text" id="updateText"></span>
+        <div class="update-progress" id="updateProgress" style="display: none;">
+          <div class="update-progress-bar" id="updateProgressBar"></div>
+        </div>
+        <button class="update-btn" id="updateBtn" onclick="handleUpdateAction()"></button>
+        <button class="update-dismiss" id="updateDismiss" onclick="dismissUpdate()">x</button>
+      </div>
     </header>
 
     <!-- Tab Bar -->

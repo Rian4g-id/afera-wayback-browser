@@ -830,5 +830,83 @@ function stopPreviewTimer() {
   previewStartTime = null;
 }
 
+// ==================== IN-APP UPDATE UI ====================
+
+let updateAction = null; // 'download' | 'install'
+
+ipcRenderer.on('update-status', (event, data) => {
+  const banner = document.getElementById('updateBanner');
+  const text = document.getElementById('updateText');
+  const btn = document.getElementById('updateBtn');
+  const progress = document.getElementById('updateProgress');
+  const progressBar = document.getElementById('updateProgressBar');
+  const dismiss = document.getElementById('updateDismiss');
+
+  switch (data.status) {
+    case 'available':
+      banner.style.display = 'flex';
+      banner.className = 'update-banner available';
+      text.textContent = `Update v${data.version} available!`;
+      btn.textContent = 'Download';
+      btn.style.display = 'inline-block';
+      progress.style.display = 'none';
+      dismiss.style.display = 'inline-block';
+      updateAction = 'download';
+      break;
+
+    case 'downloading':
+      banner.style.display = 'flex';
+      banner.className = 'update-banner downloading';
+      text.textContent = `Downloading... ${data.percent}%`;
+      btn.style.display = 'none';
+      progress.style.display = 'block';
+      progressBar.style.width = data.percent + '%';
+      dismiss.style.display = 'none';
+      break;
+
+    case 'downloaded':
+      banner.style.display = 'flex';
+      banner.className = 'update-banner downloaded';
+      text.textContent = 'Update ready!';
+      btn.textContent = 'Restart & Install';
+      btn.style.display = 'inline-block';
+      progress.style.display = 'none';
+      dismiss.style.display = 'inline-block';
+      updateAction = 'install';
+      break;
+
+    case 'error':
+      banner.style.display = 'flex';
+      banner.className = 'update-banner error';
+      text.textContent = 'Update failed';
+      btn.textContent = 'Retry';
+      btn.style.display = 'inline-block';
+      progress.style.display = 'none';
+      dismiss.style.display = 'inline-block';
+      updateAction = 'check';
+      break;
+
+    case 'not-available':
+      banner.style.display = 'none';
+      break;
+  }
+});
+
+function handleUpdateAction() {
+  if (updateAction === 'download') {
+    ipcRenderer.send('update-download');
+  } else if (updateAction === 'install') {
+    ipcRenderer.send('update-install');
+  } else if (updateAction === 'check') {
+    ipcRenderer.send('update-check');
+  }
+}
+
+function dismissUpdate() {
+  document.getElementById('updateBanner').style.display = 'none';
+}
+
+// ==================== END IN-APP UPDATE ====================
+
 // Initialize
 showScreen('welcome');
