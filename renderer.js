@@ -673,17 +673,17 @@ document.addEventListener('DOMContentLoaded', () => {
       updatePreviewStatus('Connecting to Wayback Machine...');
     });
 
-    // DOM ready (page structure loaded)
+    // DOM ready (page structure loaded) - hide overlay early for faster UX
     webview.addEventListener('dom-ready', () => {
-      updatePreviewStatus('Loading page content...');
+      stopPreviewTimer();
+      showPreviewLoading(false);
+      showPreviewError(false);
+      updatePreviewStatus('Page loaded (assets may still be loading...)');
     });
 
     // Fully loaded
     webview.addEventListener('did-finish-load', () => {
-      stopPreviewTimer();
-      showPreviewLoading(false);
-      showPreviewError(false);
-      setStatus('Snapshot loaded');
+      setStatus('Fully loaded');
     });
 
     // Load failed
