@@ -530,6 +530,11 @@ function toRawWaybackUrl(url) {
   return url.replace(/\/web\/(\d{14})\//, '/web/$1id_/');
 }
 
+// Check if URL is raw Wayback format
+function isRawWaybackUrl(url) {
+  return /\/web\/\d{14}id_\//.test(url);
+}
+
 // Open snapshot in preview tab (di dalam app)
 function openPreview(url, date) {
   const tabId = 'preview-' + Date.now();
@@ -680,10 +685,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // DOM ready (page structure loaded) - hide overlay early for faster UX
     webview.addEventListener('dom-ready', () => {
-      stopPreviewTimer();
-      showPreviewLoading(false);
-      showPreviewError(false);
-      updatePreviewStatus('Page loaded (assets may still be loading...)');
+      // Check if page is blank when using raw URL, fallback to normal URL
+      const currentSrc = webview.getURL();
+      if (isRawWaybackUrl(currentSrc)) {
+        webview.executeJavaScript('document.body ? document.body.innerText.trim().length : 0')
+          .then(textLen => {
+            if (textLen === 0) {
+              // Page is blank, reload with normal URL (with Wayback toolbar)
+              const normalUrl = currentSrc.replace(/\/web\/(\d{14})id_\//, '/web/$1/');
+              updatePreviewStatus('Retrying with full page mode...');
+              webview.src = normalUrl;
+              return;
+            }
+            stopPreviewTimer();
+            showPreviewLoading(false);
+            showPreviewError(false);
+            updatePreviewStatus('Page loaded (assets may still be loading...)');
+          })
+          .catch(() => {
+            stopPreviewTimer();
+            showPreviewLoading(false);
+            showPreviewError(false);
+          });
+      } else {
+        stopPreviewTimer();
+        showPreviewLoading(false);
+        showPreviewError(false);
+        updatePreviewStatus('Page loaded (assets may still be loading...)');
+      }
     });
 
     // Fully loaded

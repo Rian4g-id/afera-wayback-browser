@@ -1,6 +1,6 @@
 {
   "name": "afera-wayback-browser",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Wayback Machine Browser - Check website history by Afera",
   "main": "main.js",
   "author": "Afera",
