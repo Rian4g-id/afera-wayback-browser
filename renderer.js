@@ -525,6 +525,11 @@ function setStatus(text) {
   document.getElementById('statusText').textContent = text;
 }
 
+// Convert Wayback URL to raw format (skip toolbar for faster loading)
+function toRawWaybackUrl(url) {
+  return url.replace(/\/web\/(\d{14})\//, '/web/$1id_/');
+}
+
 // Open snapshot in preview tab (di dalam app)
 function openPreview(url, date) {
   const tabId = 'preview-' + Date.now();
@@ -549,7 +554,7 @@ function openPreview(url, date) {
   updatePreviewStatus('Connecting to Wayback Machine...');
 
   const webview = document.getElementById('previewWebview');
-  webview.src = url;
+  webview.src = toRawWaybackUrl(url);
 
   // Show preview container, hide main content
   document.getElementById('previewContainer').style.display = 'flex';
@@ -579,7 +584,7 @@ function switchTab(tabId) {
     if (tab && tab.url) {
       currentPreviewUrl = tab.url;
       document.getElementById('previewUrl').textContent = tab.url;
-      document.getElementById('previewWebview').src = tab.url;
+      document.getElementById('previewWebview').src = toRawWaybackUrl(tab.url);
       document.getElementById('previewContainer').style.display = 'flex';
       document.querySelector('.main-content').style.display = 'none';
       document.getElementById('statsBar').style.display = 'none';
