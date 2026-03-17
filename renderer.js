@@ -919,7 +919,7 @@ ipcRenderer.on('update-status', (event, data) => {
     case 'error':
       banner.style.display = 'flex';
       banner.className = 'update-banner error';
-      text.textContent = 'Update failed';
+      text.textContent = 'Update failed: ' + (data.message || 'Unknown error');
       btn.textContent = 'Retry';
       btn.style.display = 'inline-block';
       progress.style.display = 'none';

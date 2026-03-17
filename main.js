@@ -104,7 +104,8 @@ autoUpdater.on('update-downloaded', (info) => {
 // Event: Error
 autoUpdater.on('error', (error) => {
   console.error('Auto-update error:', error);
-  sendUpdateStatus('error', { message: error.message });
+  const msg = error.message || String(error);
+  sendUpdateStatus('error', { message: msg.substring(0, 150) });
 });
 
 // IPC: User wants to download update
