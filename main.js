@@ -5,6 +5,7 @@ const path = require('path');
 // Auto-updater configuration
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
 
 let mainWindow;
 
