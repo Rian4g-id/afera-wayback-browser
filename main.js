@@ -40,6 +40,11 @@ function createWindow() {
 app.whenReady().then(() => {
   createWindow();
 
+  // Send app version to renderer
+  mainWindow.webContents.on('did-finish-load', () => {
+    mainWindow.webContents.send('app-version', app.getVersion());
+  });
+
   // Check for updates after 3 seconds (give app time to load)
   setTimeout(() => {
     checkForUpdates();

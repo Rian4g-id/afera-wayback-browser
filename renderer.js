@@ -830,6 +830,13 @@ function stopPreviewTimer() {
   previewStartTime = null;
 }
 
+// ==================== APP VERSION ====================
+
+ipcRenderer.on('app-version', (event, version) => {
+  const el = document.getElementById('appVersion');
+  if (el) el.textContent = 'v' + version;
+});
+
 // ==================== IN-APP UPDATE UI ====================
 
 let updateAction = null; // 'download' | 'install'
