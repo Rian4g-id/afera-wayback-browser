@@ -1,20 +1,41 @@
 const { ipcRenderer } = require('electron');
 
-// Source configurations
+// Source configurations (tried in this order)
+// archive: sources with the same archive share one index (an answer from either counts for both).
+// timeout covers the whole request incl. body; web.archive.org itself drops requests after ~30s.
+// retries apply only to transient errors (HTTP 429/5xx, dropped connection), not to timeouts.
 const SOURCES = {
   wayback: {
     name: 'Wayback CDX',
     short: 'WB',
     color: '#00d4ff',
-    timeout: 15000
+    archive: 'wayback',
+    timeout: 30000,
+    retries: 2
   },
   timemap: {
     name: 'Wayback Timemap',
     short: 'TM',
     color: '#ffc800',
-    timeout: 15000
+    archive: 'wayback',
+    timeout: 30000,
+    retries: 1
+  },
+  arquivo: {
+    name: 'Arquivo.pt',
+    short: 'PT',
+    color: '#7cff6b',
+    archive: 'arquivo',
+    timeout: 20000,
+    retries: 1
   }
 };
+
+// Max snapshots requested per source (Wayback/Timemap return the newest N)
+const SNAPSHOT_LIMIT = 10000;
+
+// HTTP statuses worth retrying: rate limit / overloaded / gateway problems
+const RETRYABLE_STATUS = [429, 500, 502, 503, 504];
 
 // Global state
 let currentDomain = '';
@@ -41,8 +62,8 @@ let previewStartTime = null;
 // Cache for multi-source results (memory only, cleared on app close)
 const snapshotCache = {};
 
-// Current fetch abort controller (for cancel)
-let currentFetchController = null;
+// Abort controller of the search in progress (Cancel button / superseded by a new search)
+let currentSearchController = null;
 
 // DOM Elements
 const domainInput = document.getElementById('domainInput');
@@ -81,6 +102,11 @@ async function searchDomain() {
     return;
   }
 
+  // Abort a search that is still running so its late result can't overwrite this one
+  if (currentSearchController) currentSearchController.abort();
+  const controller = new AbortController();
+  currentSearchController = controller;
+
   currentDomain = domain;
   currentSource = null;
   showScreen('loading');
@@ -88,7 +114,9 @@ async function searchDomain() {
   startLoadingTimer();
 
   try {
-    const result = await fetchWithFallback(domain);
+    const result = await fetchWithFallback(domain, controller.signal);
+    // Cancelled or superseded: cancelFetch() / the newer search owns the UI now
+    if (controller.signal.aborted) return;
     stopLoadingTimer();
 
     if (!result.snapshots || result.snapshots.length === 0) {
@@ -112,165 +140,208 @@ async function searchDomain() {
 
     setStatus(`Loaded ${result.snapshots.length} snapshots from ${sourceInfo.name}`);
 
+    // Hit the request limit: there are more snapshots than shown
+    if (result.snapshots.length >= SNAPSHOT_LIMIT) {
+      document.getElementById('totalSnapshots').textContent =
+        `${result.snapshots.length.toLocaleString()}+`;
+      setStatus(`Loaded ${result.snapshots.length.toLocaleString()} snapshots from ${sourceInfo.name} (limit reached, not all snapshots shown)`);
+    }
+
   } catch (error) {
+    if (controller.signal.aborted) return;
     stopLoadingTimer();
     console.error('Error:', error);
     showScreen('error');
 
-    let errorMsg = 'Failed to fetch from all archives. Please try again later.';
-
-    if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
-      errorMsg = 'Search cancelled.';
-    } else if (error.message.includes('network')) {
+    let errorMsg = `Failed to fetch from all archives. Please try again later. (${error.message})`;
+    if (!navigator.onLine) {
       errorMsg = 'Network error. Please check your internet connection.';
     }
 
     document.getElementById('errorMessage').textContent = errorMsg;
     setStatus('Error');
+  } finally {
+    if (currentSearchController === controller) currentSearchController = null;
   }
 }
 
-// Fallback fetch: Wayback CDX -> Wayback Timemap
-async function fetchWithFallback(domain) {
+// Fetchers per source, same order as SOURCES
+const FETCHERS = {
+  wayback: fetchWaybackCDX,
+  timemap: fetchWaybackTimemap,
+  arquivo: fetchArquivo
+};
+
+// Fallback fetch: Wayback CDX -> Wayback Timemap -> Arquivo.pt
+async function fetchWithFallback(domain, signal) {
   // Check cache first
   if (snapshotCache[domain]) {
     setStatus(`Loaded from cache (${snapshotCache[domain].snapshots.length} snapshots)`);
     return snapshotCache[domain];
   }
 
-  // Source 1: Wayback CDX API (primary)
-  updateLoadingStatus('wayback', 'loading');
-  try {
-    const snapshots = await fetchWaybackCDX(domain);
-    if (snapshots && snapshots.length > 0) {
-      updateLoadingStatus('wayback', 'success');
-      const result = { snapshots, source: 'wayback' };
-      snapshotCache[domain] = result;
-      return result;
+  const failures = [];
+  const answeredArchives = new Set(); // archives that answered "no snapshots"
+
+  for (const source of Object.keys(SOURCES)) {
+    const info = SOURCES[source];
+    // Same index already answered "no snapshots" (e.g. Timemap after CDX)
+    if (answeredArchives.has(info.archive)) continue;
+
+    updateLoadingStatus(source, 'loading');
+    try {
+      const snapshots = await FETCHERS[source](domain, signal);
+      if (snapshots.length > 0) {
+        updateLoadingStatus(source, 'success');
+        const result = { snapshots, source };
+        snapshotCache[domain] = result;
+        return result;
+      }
+      updateLoadingStatus(source, 'empty');
+      answeredArchives.add(info.archive);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      console.error(`${info.name} failed:`, error.message);
+      updateLoadingStatus(source, 'failed');
+      failures.push({ archive: info.archive, message: `${info.name}: ${error.message}` });
     }
-    updateLoadingStatus('wayback', 'empty');
-  } catch (error) {
-    console.error('CDX failed:', error.message);
-    if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
-      throw error;
-    }
-    updateLoadingStatus('wayback', 'failed');
   }
 
-  // Source 2: Wayback Timemap API (fallback)
-  updateLoadingStatus('timemap', 'loading');
-  try {
-    const snapshots = await fetchWaybackTimemap(domain);
-    if (snapshots && snapshots.length > 0) {
-      updateLoadingStatus('timemap', 'success');
-      const result = { snapshots, source: 'timemap' };
-      snapshotCache[domain] = result;
-      return result;
-    }
-    updateLoadingStatus('timemap', 'empty');
-  } catch (error) {
-    console.error('Timemap failed:', error.message);
-    if (error.message.includes('cancelled') || error.message.includes('Cancel')) {
-      throw error;
-    }
-    updateLoadingStatus('timemap', 'failed');
+  // Every archive answered and none has data -> genuinely no snapshots
+  if (failures.every(f => answeredArchives.has(f.archive))) {
+    return { snapshots: [], source: null };
   }
 
-  throw new Error('All archive sources failed. Please try again later.');
+  throw new Error(failures.map(f => f.message).join(' | '));
 }
 
-// Fetch with timeout helper
-async function fetchWithTimeout(url, timeout) {
+// Fetch a URL as text. The timeout covers the whole request including the body,
+// and the search signal aborts it immediately (Cancel button / new search).
+async function fetchText(url, timeout, signal) {
+  if (signal.aborted) throw new Error('Search cancelled');
+
   const controller = new AbortController();
-  currentFetchController = controller;
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const abort = () => controller.abort();
+  const timeoutId = setTimeout(abort, timeout);
+  signal.addEventListener('abort', abort);
 
   try {
     const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
-    currentFetchController = null;
-    return response;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    currentFetchController = null;
-
-    if (error.name === 'AbortError' && controller.signal.reason === 'cancelled') {
-      throw new Error('Search cancelled');
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      error.retryAfter = parseInt(response.headers.get('Retry-After'), 10);
+      throw error;
     }
-
+    return await response.text();
+  } catch (error) {
+    if (signal.aborted) throw new Error('Search cancelled');
+    if (error.name === 'AbortError') throw new Error(`timed out after ${timeout / 1000}s`);
     throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    signal.removeEventListener('abort', abort);
   }
 }
 
-// Fetch from Wayback Machine CDX API (primary)
-async function fetchWaybackCDX(domain) {
-  const url = `https://web.archive.org/cdx/search/cdx?url=${domain}&output=json&limit=10000`;
-  const response = await fetchWithTimeout(url, SOURCES.wayback.timeout);
+// Wait ms, but stop right away if the search is cancelled
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      reject(new Error('Search cancelled'));
+    };
+    const timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort);
+  });
+}
 
-  if (!response.ok) throw new Error(`CDX error: ${response.status}`);
+// Fetch with retry on transient errors. Wayback often answers
+// "503 Temporarily Offline" for a moment, so a short wait usually fixes it.
+async function fetchWithRetry(source, url, signal) {
+  const { timeout, retries } = SOURCES[source];
 
-  const data = await response.json();
-  if (data.length <= 1) return [];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetchText(url, timeout, signal);
+    } catch (error) {
+      // HTTP error -> retry on 429/5xx only; no status -> TypeError means the connection failed
+      const retryable = error.status
+        ? RETRYABLE_STATUS.includes(error.status)
+        : error.name === 'TypeError';
+      if (signal.aborted || !retryable || attempt >= retries) throw error;
+
+      // Honor Retry-After (capped at 10s), otherwise back off 2s, 4s, ...
+      const delay = error.retryAfter > 0
+        ? Math.min(error.retryAfter, 10) * 1000
+        : 2000 * (attempt + 1);
+      updateLoadingStatus(source, 'retrying', `${error.message}, retry ${attempt + 1}/${retries} in ${delay / 1000}s`);
+      await sleep(delay, signal);
+    }
+  }
+}
+
+// Parse Wayback CDX/Timemap JSON (first row = field names) into snapshots
+function parseWaybackRows(data, source) {
+  if (!Array.isArray(data) || data.length <= 1) return [];
+
+  const header = data[0];
+  const tsIdx = header.indexOf('timestamp');
+  const urlIdx = header.indexOf('original');
+  const statusIdx = header.indexOf('statuscode');
 
   return data.slice(1).map(row => ({
-    timestamp: row[1],
-    originalUrl: row[2],
-    url: `https://web.archive.org/web/${row[1]}/${row[2]}`,
-    statusCode: row[4] || '200',
-    source: 'wayback'
+    timestamp: row[tsIdx],
+    originalUrl: row[urlIdx],
+    url: `https://web.archive.org/web/${row[tsIdx]}/${row[urlIdx]}`,
+    statusCode: row[statusIdx] || '200',
+    source
   }));
 }
 
-// Fetch from Wayback Timemap API (fallback)
-async function fetchWaybackTimemap(domain) {
-  const url = `https://web.archive.org/web/timemap/json/${domain}`;
-  const response = await fetchWithTimeout(url, SOURCES.timemap.timeout);
+// Fetch from Wayback Machine CDX API (primary).
+// Negative limit = newest N snapshots; fl keeps the payload small.
+async function fetchWaybackCDX(domain, signal) {
+  const url = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(domain)}` +
+    `&output=json&fl=timestamp,original,statuscode&limit=-${SNAPSHOT_LIMIT}`;
+  const text = await fetchWithRetry('wayback', url, signal);
+  return parseWaybackRows(JSON.parse(text || '[]'), 'wayback');
+}
 
-  if (!response.ok) throw new Error(`Timemap error: ${response.status}`);
+// Fetch from Wayback Timemap API (fallback, different Wayback endpoint).
+// Exact match + limit: without them it returns every URL under the domain (can be 90+ MB).
+async function fetchWaybackTimemap(domain, signal) {
+  const url = `https://web.archive.org/web/timemap/json?url=${encodeURIComponent(domain)}` +
+    `&matchType=exact&fl=timestamp,original,statuscode&limit=-${SNAPSHOT_LIMIT}`;
+  const text = await fetchWithRetry('timemap', url, signal);
+  return parseWaybackRows(JSON.parse(text || '[]'), 'timemap');
+}
 
-  const data = await response.json();
-  if (!data || data.length <= 1) return [];
+// Fetch from Arquivo.pt CDX API (fallback, independent archive used when Wayback is down).
+// Free, no API key; coverage of non-.pt sites is smaller than Wayback.
+async function fetchArquivo(domain, signal) {
+  const url = `https://arquivo.pt/wayback/cdx?url=${encodeURIComponent(domain)}` +
+    `&output=json&sort=reverse&limit=${SNAPSHOT_LIMIT}`;
+  const text = await fetchWithRetry('arquivo', url, signal);
 
-  const snapshots = [];
-  for (let i = 1; i < data.length; i++) {
-    const row = data[i];
-    if (!row || row.length < 2) continue;
-
-    // Find timestamp (14-digit number)
-    let timestamp = null;
-    let statusCode = '200';
-
-    for (const field of row) {
-      if (typeof field === 'string' && /^\d{14}$/.test(field)) {
-        timestamp = field;
-        break;
-      }
-    }
-
-    // Find status code if present
-    for (const field of row) {
-      if (typeof field === 'string' && /^[2-5]\d{2}$/.test(field)) {
-        statusCode = field;
-        break;
-      }
-    }
-
-    if (timestamp) {
-      snapshots.push({
-        timestamp: timestamp,
-        originalUrl: domain,
-        url: `https://web.archive.org/web/${timestamp}/${domain}`,
-        statusCode: statusCode,
-        source: 'timemap'
-      });
-    }
-  }
-
-  return snapshots;
+  // Response is NDJSON: one JSON object per line (empty body = no snapshots)
+  return text.split('\n')
+    .filter(line => line.trim())
+    .map(line => JSON.parse(line))
+    .map(row => ({
+      timestamp: row.timestamp,
+      originalUrl: row.url,
+      url: `https://arquivo.pt/wayback/${row.timestamp}/${row.url}`,
+      statusCode: row.status || '200',
+      source: 'arquivo'
+    }));
 }
 
 // Update loading status UI during fallback
-function updateLoadingStatus(source, status) {
+function updateLoadingStatus(source, status, detail = '') {
   const info = SOURCES[source];
   if (!info) return;
 
@@ -284,6 +355,10 @@ function updateLoadingStatus(source, status) {
     case 'loading':
       icon = '...';
       text = `Trying ${info.name}...`;
+      break;
+    case 'retrying':
+      icon = '...';
+      text = `${info.name} - ${detail}`;
       break;
     case 'success':
       icon = '[OK]';
@@ -427,6 +502,16 @@ function selectMonth(month) {
   displaySnapshots(snapshots);
 }
 
+// Escape a value for safe insertion into HTML (text and attribute context)
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Display snapshots list
 function displaySnapshots(snapshots) {
   const count = snapshots.length;
@@ -446,33 +531,55 @@ function displaySnapshots(snapshots) {
     const time = formatTime(snap.timestamp);
     const snapUrl = snap.url;
 
-    // Status icon - text based
+    // Status icon - text based (compare numerically)
     let statusIcon = '*';
-    const statusCode = snap.statusCode;
+    const statusCode = String(snap.statusCode || '');
+    const statusNum = parseInt(statusCode, 10);
     if (statusCode === '301' || statusCode === '302') statusIcon = '>';
     else if (statusCode === '404') statusIcon = 'x';
-    else if (statusCode >= '500') statusIcon = '!';
+    else if (statusNum >= 500) statusIcon = '!';
 
+    // URLs and dates are passed via escaped data-* attributes (not inline JS)
+    // to avoid breakage / code injection from quotes in archived URLs.
     return `
-      <div class="snapshot-item">
+      <div class="snapshot-item" data-url="${escapeHtml(snapUrl)}" data-date="${escapeHtml(date)}">
         <div class="snapshot-info">
-          <span class="snapshot-source" style="background: ${source.color}20; color: ${source.color}; border: 1px solid ${source.color}40;" title="${source.name}">
-            ${source.short}
+          <span class="snapshot-source" style="background: ${source.color}20; color: ${source.color}; border: 1px solid ${source.color}40;" title="${escapeHtml(source.name)}">
+            ${escapeHtml(source.short)}
           </span>
-          <span class="snapshot-icon status-${statusCode}">${statusIcon}</span>
-          <span class="snapshot-date">${date}</span>
-          <span class="snapshot-time">${time}</span>
-          <span class="snapshot-status">[${statusCode}]</span>
+          <span class="snapshot-icon status-${escapeHtml(statusCode)}">${statusIcon}</span>
+          <span class="snapshot-date">${escapeHtml(date)}</span>
+          <span class="snapshot-time">${escapeHtml(time)}</span>
+          <span class="snapshot-status">[${escapeHtml(statusCode)}]</span>
         </div>
         <div class="snapshot-actions">
-          <button class="snapshot-btn" onclick="copyUrl('${snapUrl}')">Copy</button>
-          <button class="snapshot-btn" onclick="openPreview('${snapUrl}', '${date}')">Preview</button>
-          <button class="snapshot-btn primary" onclick="openSnapshot('${snapUrl}')">Open</button>
+          <button class="snapshot-btn" data-action="copy">Copy</button>
+          <button class="snapshot-btn" data-action="preview">Preview</button>
+          <button class="snapshot-btn primary" data-action="open">Open</button>
         </div>
       </div>
     `;
   }).join('');
 }
+
+// Event delegation for snapshot action buttons (replaces inline onclick).
+// Robust against quotes/special chars in archived URLs.
+snapshotsList.addEventListener('click', (e) => {
+  const btn = e.target.closest('.snapshot-btn');
+  if (!btn) return;
+  const item = btn.closest('.snapshot-item');
+  if (!item) return;
+
+  const url = item.dataset.url;
+  const date = item.dataset.date;
+  if (!url) return;
+
+  switch (btn.dataset.action) {
+    case 'copy': copyUrl(url); break;
+    case 'preview': openPreview(url, date); break;
+    case 'open': openSnapshot(url); break;
+  }
+});
 
 // Open snapshot in external browser
 function openSnapshot(url) {
@@ -798,6 +905,7 @@ function getErrorMessage(code, description) {
 
 // Loading timer - shows elapsed seconds during fetch
 function startLoadingTimer() {
+  stopLoadingTimer(); // a superseded search may have left its timer running
   loadingStartTime = Date.now();
   const timerEl = document.getElementById('loadingTimer');
   const warningEl = document.getElementById('loadingSlowWarning');
@@ -828,9 +936,9 @@ function stopLoadingTimer() {
 
 // Cancel current fetch
 function cancelFetch() {
-  if (currentFetchController) {
-    currentFetchController.abort('cancelled');
-    currentFetchController = null;
+  if (currentSearchController) {
+    currentSearchController.abort();
+    currentSearchController = null;
   }
   stopLoadingTimer();
   showScreen('error');
@@ -871,83 +979,80 @@ ipcRenderer.on('app-version', (event, version) => {
   if (el) el.textContent = 'v' + version;
 });
 
-// ==================== IN-APP UPDATE UI ====================
+// ==================== MANDATORY UPDATE POPUP ====================
+// Once an update is found the popup covers the whole app and can't be closed:
+// the update downloads automatically and the app restarts into the new version.
 
-let updateAction = null; // 'download' | 'install'
+let updateAction = null; // 'install' | 'check'
 
 ipcRenderer.on('update-status', (event, data) => {
-  const banner = document.getElementById('updateBanner');
+  const modal = document.getElementById('updateModal');
+  const title = document.getElementById('updateTitle');
   const text = document.getElementById('updateText');
   const btn = document.getElementById('updateBtn');
   const progress = document.getElementById('updateProgress');
   const progressBar = document.getElementById('updateProgressBar');
-  const dismiss = document.getElementById('updateDismiss');
+
+  if (data.status === 'not-available') {
+    modal.style.display = 'none';
+    return;
+  }
+
+  // Block the app; drop focus so Enter can't start a search behind the popup
+  modal.style.display = 'flex';
+  if (document.activeElement) document.activeElement.blur();
 
   switch (data.status) {
     case 'available':
-      banner.style.display = 'flex';
-      banner.className = 'update-banner available';
-      text.textContent = `Update v${data.version} available!`;
-      btn.textContent = 'Download';
-      btn.style.display = 'inline-block';
-      progress.style.display = 'none';
-      dismiss.style.display = 'inline-block';
-      updateAction = 'download';
+      modal.className = 'update-modal available';
+      title.textContent = 'Update Required';
+      text.textContent = `Version v${data.version} is available and required to continue. Downloading...`;
+      btn.style.display = 'none';
+      progress.style.display = 'block';
+      progressBar.style.width = '0%';
       break;
 
     case 'downloading':
-      banner.style.display = 'flex';
-      banner.className = 'update-banner downloading';
-      text.textContent = `Downloading... ${data.percent}%`;
+      modal.className = 'update-modal downloading';
+      title.textContent = 'Update Required';
+      text.textContent = `Downloading update... ${data.percent}%`;
       btn.style.display = 'none';
       progress.style.display = 'block';
       progressBar.style.width = data.percent + '%';
-      dismiss.style.display = 'none';
       break;
 
     case 'downloaded':
-      banner.style.display = 'flex';
-      banner.className = 'update-banner downloaded';
-      text.textContent = 'Update ready!';
-      btn.textContent = 'Restart & Install';
+      modal.className = 'update-modal downloaded';
+      title.textContent = 'Update Ready';
+      text.textContent = `v${data.version} downloaded. The app will restart to install it...`;
+      btn.textContent = 'Restart Now';
       btn.style.display = 'inline-block';
-      progress.style.display = 'none';
-      dismiss.style.display = 'inline-block';
+      progress.style.display = 'block';
+      progressBar.style.width = '100%';
       updateAction = 'install';
       break;
 
     case 'error':
-      banner.style.display = 'flex';
-      banner.className = 'update-banner error';
-      text.textContent = 'Update failed: ' + (data.message || 'Unknown error');
+      modal.className = 'update-modal error';
+      title.textContent = 'Update Failed';
+      text.textContent = 'Could not download the update: ' + (data.message || 'Unknown error');
       btn.textContent = 'Retry';
       btn.style.display = 'inline-block';
       progress.style.display = 'none';
-      dismiss.style.display = 'inline-block';
       updateAction = 'check';
-      break;
-
-    case 'not-available':
-      banner.style.display = 'none';
       break;
   }
 });
 
 function handleUpdateAction() {
-  if (updateAction === 'download') {
-    ipcRenderer.send('update-download');
-  } else if (updateAction === 'install') {
+  if (updateAction === 'install') {
     ipcRenderer.send('update-install');
   } else if (updateAction === 'check') {
     ipcRenderer.send('update-check');
   }
 }
 
-function dismissUpdate() {
-  document.getElementById('updateBanner').style.display = 'none';
-}
-
-// ==================== END IN-APP UPDATE ====================
+// ==================== END MANDATORY UPDATE ====================
 
 // Initialize
 showScreen('welcome');

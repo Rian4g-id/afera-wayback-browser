@@ -107,64 +107,72 @@ body {
   box-shadow: 0 5px 20px rgba(0, 212, 255, 0.4);
 }
 
-/* Update Banner */
-.update-banner {
+/* Mandatory Update Popup */
+.update-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  border-radius: 20px;
-  font-size: 12px;
-  white-space: nowrap;
-  margin-left: 15px;
+  justify-content: center;
+  background: rgba(10, 10, 25, 0.85);
+  backdrop-filter: blur(4px);
 }
 
-.update-banner.available {
-  background: rgba(0, 212, 255, 0.15);
+.update-dialog {
+  width: 380px;
+  padding: 30px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
   border: 1px solid rgba(0, 212, 255, 0.4);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  text-align: center;
 }
 
-.update-banner.downloading {
-  background: rgba(255, 200, 0, 0.15);
-  border: 1px solid rgba(255, 200, 0, 0.4);
+.update-modal.downloaded .update-dialog {
+  border-color: rgba(0, 255, 100, 0.4);
 }
 
-.update-banner.downloaded {
-  background: rgba(0, 255, 100, 0.15);
-  border: 1px solid rgba(0, 255, 100, 0.4);
+.update-modal.error .update-dialog {
+  border-color: rgba(255, 107, 107, 0.4);
 }
 
-.update-banner.error {
-  background: rgba(255, 107, 107, 0.15);
-  border: 1px solid rgba(255, 107, 107, 0.4);
+.update-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  margin-bottom: 12px;
+}
+
+.update-dialog h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
 }
 
 .update-text {
-  color: #eee;
-  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 18px;
 }
 
 .update-btn {
-  padding: 4px 14px;
+  padding: 10px 28px;
   border: none;
-  border-radius: 12px;
-  font-size: 11px;
+  border-radius: 20px;
+  background: #00d4ff;
+  color: #111;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.update-banner.available .update-btn {
-  background: #00d4ff;
-  color: #111;
-}
-
-.update-banner.downloaded .update-btn {
+.update-modal.downloaded .update-btn {
   background: #00ff64;
-  color: #111;
 }
 
-.update-banner.error .update-btn {
+.update-modal.error .update-btn {
   background: rgba(255, 255, 255, 0.2);
   color: #eee;
 }
@@ -174,32 +182,20 @@ body {
   filter: brightness(1.15);
 }
 
-.update-dismiss {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 0 4px;
-  line-height: 1;
-}
-
-.update-dismiss:hover {
-  color: #fff;
-}
-
 .update-progress {
-  width: 80px;
-  height: 4px;
+  width: 100%;
+  height: 6px;
+  margin-bottom: 18px;
   background: rgba(255, 255, 255, 0.15);
-  border-radius: 2px;
+  border-radius: 3px;
   overflow: hidden;
 }
 
 .update-progress-bar {
+  width: 0;
   height: 100%;
   background: linear-gradient(90deg, #ffc800, #00d4ff);
-  border-radius: 2px;
+  border-radius: 3px;
   transition: width 0.3s ease;
 }
 
@@ -646,6 +642,12 @@ body {
   background: rgba(255, 200, 0, 0.15);
   color: #ffc800;
   border: 1px solid rgba(255, 200, 0, 0.3);
+}
+
+.source-indicator.pt {
+  background: rgba(124, 255, 107, 0.15);
+  color: #7cff6b;
+  border: 1px solid rgba(124, 255, 107, 0.3);
 }
 
 .snapshot-status {

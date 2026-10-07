@@ -3,11 +3,19 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 // Auto-updater configuration
-autoUpdater.autoDownload = false;
+// Updates are mandatory: download starts as soon as one is found,
+// then the app installs it silently and restarts into the new version.
+autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
 
+// Re-check while the app stays open
+const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
+
 let mainWindow;
+
+// True once an update was found: the mandatory update popup is showing
+let updateInProgress = false;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -46,10 +54,14 @@ app.whenReady().then(() => {
     mainWindow.webContents.send('app-version', app.getVersion());
   });
 
-  // Check for updates after 3 seconds (give app time to load)
-  setTimeout(() => {
-    checkForUpdates();
-  }, 3000);
+  // Check for updates after 3 seconds (give app time to load).
+  // Only when packaged — electron-updater throws/errors in dev mode.
+  if (app.isPackaged) {
+    setTimeout(() => {
+      checkForUpdates();
+    }, 3000);
+    setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL);
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -72,7 +84,9 @@ ipcMain.on('open-external', (event, url) => {
 // ==================== AUTO-UPDATE FUNCTIONS ====================
 
 function checkForUpdates() {
-  autoUpdater.checkForUpdates();
+  if (updateInProgress) return; // already downloading/installing
+  // Failures are reported through the 'error' event
+  autoUpdater.checkForUpdates().catch(() => {});
 }
 
 // Send update status to renderer
@@ -82,8 +96,14 @@ function sendUpdateStatus(status, data = {}) {
   }
 }
 
-// Event: Update available
+// Install silently (no installer wizard) and relaunch the app afterwards
+function installUpdate() {
+  autoUpdater.quitAndInstall(true, true);
+}
+
+// Event: Update available (download starts automatically)
 autoUpdater.on('update-available', (info) => {
+  updateInProgress = true;
   sendUpdateStatus('available', { version: info.version });
 });
 
@@ -97,31 +117,30 @@ autoUpdater.on('download-progress', (progress) => {
   sendUpdateStatus('downloading', { percent: Math.round(progress.percent) });
 });
 
-// Event: Update downloaded
+// Event: Update downloaded -> install and restart after a short notice
 autoUpdater.on('update-downloaded', (info) => {
   sendUpdateStatus('downloaded', { version: info.version });
+  setTimeout(installUpdate, 3000);
 });
 
 // Event: Error
+// Only shown while a mandatory update is in progress; a failed check
+// (e.g. offline, GitHub down) must not lock the user out of the app.
 autoUpdater.on('error', (error) => {
   console.error('Auto-update error:', error);
+  if (!updateInProgress) return;
   const msg = error.message || String(error);
   sendUpdateStatus('error', { message: msg.substring(0, 150) });
 });
 
-// IPC: User wants to download update
-ipcMain.on('update-download', () => {
-  autoUpdater.downloadUpdate();
-});
-
-// IPC: User wants to install update (restart)
+// IPC: User wants to install now instead of waiting
 ipcMain.on('update-install', () => {
-  autoUpdater.quitAndInstall();
+  installUpdate();
 });
 
-// IPC: User wants to check for updates manually
+// IPC: Retry after a failed download (check again -> downloads automatically)
 ipcMain.on('update-check', () => {
-  autoUpdater.checkForUpdates();
+  autoUpdater.checkForUpdates().catch(() => {});
 });
 
 // ==================== END AUTO-UPDATE ====================

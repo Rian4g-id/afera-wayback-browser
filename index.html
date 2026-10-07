@@ -23,14 +23,6 @@
           Search
         </button>
       </div>
-      <div class="update-banner" id="updateBanner" style="display: none;">
-        <span class="update-text" id="updateText"></span>
-        <div class="update-progress" id="updateProgress" style="display: none;">
-          <div class="update-progress-bar" id="updateProgressBar"></div>
-        </div>
-        <button class="update-btn" id="updateBtn" onclick="handleUpdateAction()"></button>
-        <button class="update-dismiss" id="updateDismiss" onclick="dismissUpdate()">x</button>
-      </div>
     </header>
 
     <!-- Tab Bar -->
@@ -183,6 +175,19 @@
       <span class="footer-credit">Wayback Browser by Afera | <span id="appVersion"></span></span>
       <span id="statusText">Ready</span>
     </footer>
+  </div>
+
+  <!-- Mandatory Update Popup (covers the app, no close button) -->
+  <div class="update-modal" id="updateModal" style="display: none;">
+    <div class="update-dialog">
+      <img src="assets/logo.png" alt="Logo" class="update-logo">
+      <h3 id="updateTitle">Update Required</h3>
+      <p class="update-text" id="updateText"></p>
+      <div class="update-progress" id="updateProgress">
+        <div class="update-progress-bar" id="updateProgressBar"></div>
+      </div>
+      <button class="update-btn" id="updateBtn" onclick="handleUpdateAction()"></button>
+    </div>
   </div>
 
   <script src="renderer.js"></script>
