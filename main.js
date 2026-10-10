@@ -14,6 +14,14 @@ autoUpdater.verifyUpdateCodeSignature = () => Promise.resolve(null);
 // Re-check while the app stays open
 const UPDATE_CHECK_INTERVAL = 60 * 60 * 1000; // 1 hour
 
+// Installed "for all users" (Program Files): the installer needs admin rights, so Windows
+// shows a permission (UAC) prompt. That prompt only comes to the front when the install
+// is started by a click — started from a timer it hides in the taskbar and looks stuck.
+const updateNeedsAdmin = process.platform === 'win32' &&
+  [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432]
+    .filter(Boolean)
+    .some(dir => process.execPath.toLowerCase().startsWith(dir.toLowerCase() + '\\'));
+
 let mainWindow;
 
 // True once an update was found: the mandatory update popup is showing
@@ -120,6 +128,7 @@ function sendUpdateStatus(status, data = {}) {
 
 // Install silently (no installer wizard) and relaunch the app afterwards
 function installUpdate() {
+  sendUpdateStatus('installing', { needsAdmin: updateNeedsAdmin });
   autoUpdater.quitAndInstall(true, true);
 }
 
@@ -139,10 +148,11 @@ autoUpdater.on('download-progress', (progress) => {
   sendUpdateStatus('downloading', { percent: Math.round(progress.percent) });
 });
 
-// Event: Update downloaded -> install and restart after a short notice
+// Event: Update downloaded -> install and restart after a short notice.
+// When admin rights are needed, wait for the Install Now click (see updateNeedsAdmin).
 autoUpdater.on('update-downloaded', (info) => {
-  sendUpdateStatus('downloaded', { version: info.version });
-  setTimeout(installUpdate, 3000);
+  sendUpdateStatus('downloaded', { version: info.version, needsAdmin: updateNeedsAdmin });
+  if (!updateNeedsAdmin) setTimeout(installUpdate, 3000);
 });
 
 // Event: Error

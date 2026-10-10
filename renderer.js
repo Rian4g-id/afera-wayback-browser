@@ -1113,12 +1113,25 @@ ipcRenderer.on('update-status', (event, data) => {
     case 'downloaded':
       modal.className = 'update-modal downloaded';
       title.textContent = 'Update Ready';
-      text.textContent = `v${data.version} downloaded. The app will restart to install it...`;
-      btn.textContent = 'Restart Now';
+      text.textContent = data.needsAdmin
+        ? `v${data.version} downloaded. Click Install Now - Windows will ask for permission to update the app, click Yes.`
+        : `v${data.version} downloaded. The app will restart to install it...`;
+      btn.textContent = data.needsAdmin ? 'Install Now' : 'Restart Now';
       btn.style.display = 'inline-block';
       progress.style.display = 'block';
       progressBar.style.width = '100%';
       updateAction = 'install';
+      break;
+
+    case 'installing':
+      modal.className = 'update-modal downloaded';
+      title.textContent = 'Installing Update';
+      text.textContent = data.needsAdmin
+        ? 'If Windows asks for permission, click Yes (check the taskbar if you do not see it). The app restarts by itself.'
+        : 'Installing... the app restarts by itself.';
+      btn.style.display = 'none';
+      progress.style.display = 'block';
+      progressBar.style.width = '100%';
       break;
 
     case 'error':
