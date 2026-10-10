@@ -991,6 +991,389 @@ body {
   border: none;
 }
 
+/* Proxy button (header) */
+.proxy-btn {
+  margin-left: 15px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.proxy-btn:hover {
+  border-color: #00d4ff;
+  color: #fff;
+}
+
+.proxy-btn.active {
+  background: rgba(124, 255, 107, 0.15);
+  border-color: rgba(124, 255, 107, 0.5);
+  color: #7cff6b;
+}
+
+/* Count badge on the List tab */
+.tab-badge {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 10px;
+}
+
+.tab-badge:empty {
+  display: none;
+}
+
+.tab-badge.running {
+  background: rgba(255, 200, 0, 0.25);
+  color: #ffc800;
+}
+
+/* List: bulk check + history */
+.list-container {
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  padding: 15px 25px;
+  overflow: hidden;
+}
+
+.bulk-panel {
+  display: flex;
+  gap: 12px;
+}
+
+.bulk-panel textarea,
+.settings-dialog textarea {
+  flex: 1;
+  height: 90px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  resize: vertical;
+  outline: none;
+}
+
+.bulk-panel textarea:focus,
+.settings-dialog textarea:focus {
+  border-color: #00d4ff;
+}
+
+.bulk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 170px;
+}
+
+.bulk-count {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+}
+
+.list-btn {
+  padding: 7px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eee;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.list-btn:hover {
+  background: rgba(0, 212, 255, 0.2);
+  border-color: #00d4ff;
+}
+
+.list-btn.primary {
+  background: linear-gradient(90deg, #00d4ff, #7b2cbf);
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.list-btn.danger {
+  color: #ff6b6b;
+  border-color: rgba(255, 107, 107, 0.3);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.list-btn.danger:hover {
+  background: rgba(255, 107, 107, 0.25);
+}
+
+.list-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.bulk-progress {
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 200, 0, 0.3);
+  border-radius: 8px;
+  background: rgba(255, 200, 0, 0.08);
+  font-size: 12px;
+  color: #ffc800;
+}
+
+.bulk-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.bulk-progress-bar {
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #ffc800, #00d4ff);
+  transition: width 0.3s ease;
+}
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.list-toolbar input,
+.list-toolbar select {
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+}
+
+.list-toolbar select option {
+  background: #1a1a2e;
+}
+
+.list-summary {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.list-toolbar-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+.list-table-wrap {
+  flex: 1;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.list-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.list-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 9px 10px;
+  background: #1c2240;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.list-table th:hover {
+  color: #00d4ff;
+}
+
+.list-table td {
+  padding: 7px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.list-table tbody tr {
+  cursor: pointer;
+}
+
+.list-table tbody tr:hover {
+  background: rgba(0, 212, 255, 0.08);
+}
+
+.list-table .col-check {
+  width: 28px;
+  cursor: default;
+}
+
+.list-table .col-domain {
+  color: #fff;
+  font-weight: 600;
+}
+
+.list-table .num {
+  text-align: right;
+}
+
+.list-table .col-checked {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.list-table .col-actions {
+  text-align: right;
+}
+
+.row-pending td,
+.row-checking td {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.result-badge {
+  display: inline-block;
+  max-width: 260px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  font-size: 11px;
+}
+
+.result-ok { background: rgba(0, 255, 100, 0.15); color: #00ff64; }
+.result-empty { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
+.result-error { background: rgba(255, 107, 107, 0.15); color: #ff6b6b; }
+.result-pending { background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.4); }
+.result-checking { background: rgba(255, 200, 0, 0.15); color: #ffc800; }
+
+.code { font-weight: 600; }
+.code-ok { color: #00ff64; }
+.code-redirect { color: #ffc107; }
+.code-bad { color: #ff6b6b; }
+
+.row-btn {
+  padding: 3px 8px;
+  margin-left: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.row-btn:hover {
+  border-color: #00d4ff;
+  color: #fff;
+}
+
+.row-btn.danger:hover {
+  border-color: #ff6b6b;
+  color: #ff6b6b;
+}
+
+.list-empty {
+  padding: 40px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 13px;
+}
+
+/* Settings dialog (rotating proxy) */
+.settings-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 10, 25, 0.8);
+}
+
+.settings-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 560px;
+  max-height: 85vh;
+  padding: 24px;
+  border: 1px solid rgba(0, 212, 255, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.settings-dialog h3 {
+  font-size: 17px;
+}
+
+.settings-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-dialog textarea {
+  flex: none;
+  height: 160px;
+}
+
+.proxy-test-results {
+  max-height: 150px;
+  overflow-y: auto;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+
+.proxy-result {
+  padding: 2px 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.proxy-result.ok { color: #00ff64; }
+.proxy-result.bad { color: #ff6b6b; }
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-spacer {
+  flex: 1;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

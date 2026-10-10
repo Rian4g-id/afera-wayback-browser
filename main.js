@@ -1,6 +1,8 @@
-const { app, BrowserWindow, shell, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu, dialog } = require('electron');
 const { autoUpdater } = require('electron-updater');
+const fs = require('fs');
 const path = require('path');
+const { setupArchiveProxy } = require('./archive-proxy');
 
 // Auto-updater configuration
 // Updates are mandatory: download starts as soon as one is found,
@@ -27,7 +29,10 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      webviewTag: true
+      webviewTag: true,
+      // Keep List checks running at full speed while minimized / in the background
+      // (Chromium would otherwise slow timers down to once a minute)
+      backgroundThrottling: false
     },
     titleBarStyle: 'default',
     backgroundColor: '#1a1a2e',
@@ -47,6 +52,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  setupArchiveProxy();
   createWindow();
 
   // Send app version to renderer
@@ -79,6 +85,22 @@ app.on('activate', () => {
 // IPC handler untuk open external URL
 ipcMain.on('open-external', (event, url) => {
   shell.openExternal(url);
+});
+
+// IPC: folder where the renderer keeps the domain list / history
+ipcMain.on('get-user-data-path', (event) => {
+  event.returnValue = app.getPath('userData');
+});
+
+// IPC: save a text file (CSV export) through the Save dialog
+ipcMain.handle('save-text-file', async (event, { defaultName, content }) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName,
+    filters: [{ name: 'CSV', extensions: ['csv'] }]
+  });
+  if (canceled || !filePath) return { saved: false };
+  await fs.promises.writeFile(filePath, content, 'utf8');
+  return { saved: true, filePath };
 });
 
 // ==================== AUTO-UPDATE FUNCTIONS ====================

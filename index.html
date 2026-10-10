@@ -23,6 +23,7 @@
           Search
         </button>
       </div>
+      <button class="proxy-btn" id="proxyBtn" onclick="openProxySettings()" title="Rotating proxy settings">Proxy: Off</button>
     </header>
 
     <!-- Tab Bar -->
@@ -97,6 +98,53 @@
 
         <!-- Webview -->
         <webview id="previewWebview" class="preview-webview"></webview>
+      </div>
+    </div>
+
+    <!-- List: bulk check + history (saved on disk) -->
+    <div class="list-container" id="listContainer" style="display: none;">
+      <div class="bulk-panel">
+        <textarea id="bulkInput" placeholder="Paste domains here, one per line (or separated by commas / spaces). URLs and www. are trimmed automatically."></textarea>
+        <div class="bulk-side">
+          <button class="list-btn primary" onclick="startBulkCheck()">Check Domains</button>
+          <button class="list-btn" onclick="importDomainFile()">Import .txt / .csv</button>
+          <input type="file" id="bulkFileInput" accept=".txt,.csv" style="display: none;">
+          <span class="bulk-count" id="bulkCount"></span>
+        </div>
+      </div>
+
+      <div class="bulk-progress" id="bulkProgress" style="display: none;">
+        <span class="bulk-progress-text" id="bulkProgressText"></span>
+        <div class="bulk-progress-track"><div class="bulk-progress-bar" id="bulkProgressBar"></div></div>
+        <button class="list-btn danger" onclick="stopBulkCheck()">Stop</button>
+      </div>
+
+      <div class="list-toolbar">
+        <input type="text" id="listSearch" placeholder="Filter domains..." autocomplete="off">
+        <select id="listFilter">
+          <option value="all">All</option>
+          <option value="ok">With snapshots</option>
+          <option value="empty">No data</option>
+          <option value="error">Errors</option>
+          <option value="pending">Pending</option>
+        </select>
+        <span class="list-summary" id="listSummary"></span>
+        <div class="list-toolbar-actions">
+          <button class="list-btn" id="resumeBtn" onclick="resumePending()" style="display: none;"></button>
+          <button class="list-btn" id="retryFailedBtn" onclick="retryFailed()" style="display: none;"></button>
+          <button class="list-btn" onclick="copyList()">Copy</button>
+          <button class="list-btn" onclick="exportListCsv()">Export CSV</button>
+          <button class="list-btn danger" id="deleteSelectedBtn" onclick="deleteSelected()" disabled>Delete selected</button>
+          <button class="list-btn danger" onclick="clearHistory()">Clear history</button>
+        </div>
+      </div>
+
+      <div class="list-table-wrap">
+        <table class="list-table">
+          <thead><tr id="listHead"></tr></thead>
+          <tbody id="listBody"></tbody>
+        </table>
+        <div class="list-empty" id="listEmpty">No domains yet. Paste a list above, or search a domain on Home - every check is saved here.</div>
       </div>
     </div>
 
@@ -190,6 +238,33 @@
     </div>
   </div>
 
+  <!-- Rotating Proxy Settings -->
+  <div class="settings-modal" id="proxyModal" style="display: none;">
+    <div class="settings-dialog">
+      <h3>Rotating Proxy</h3>
+      <p class="settings-hint">
+        Optional. Archive checks (Search and List) go out through these proxies in turn, one proxy per request.
+        A proxy that fails twice in a row is skipped for a minute. Snapshot previews still load directly.
+      </p>
+      <label class="settings-toggle"><input type="checkbox" id="proxyEnabled"> Use proxies</label>
+      <textarea id="proxyList" spellcheck="false" placeholder="One proxy per line:
+host:port
+host:port:user:pass
+user:pass@host:port
+http://user:pass@host:port
+socks5://host:port  (SOCKS without login only)"></textarea>
+      <div class="proxy-test-results" id="proxyTestResults"></div>
+      <div class="settings-actions">
+        <button class="list-btn" id="proxyTestBtn" onclick="testProxies()">Test</button>
+        <span class="settings-spacer"></span>
+        <button class="list-btn" onclick="closeProxySettings()">Cancel</button>
+        <button class="list-btn primary" onclick="saveProxySettings()">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="renderer.js"></script>
+  <script src="list.js"></script>
+  <script src="proxy-settings.js"></script>
 </body>
 </html>

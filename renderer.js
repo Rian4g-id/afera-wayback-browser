@@ -37,6 +37,10 @@ const SNAPSHOT_LIMIT = 10000;
 // HTTP statuses worth retrying: rate limit / overloaded / gateway problems
 const RETRYABLE_STATUS = [429, 500, 502, 503, 504];
 
+// Rotating proxy mode (set in the Proxy dialog; requests then go through the main process)
+const proxyState = { enabled: false, count: 0 };
+let proxyRequestId = 0;
+
 // Global state
 let currentDomain = '';
 let allSnapshots = [];
@@ -47,7 +51,10 @@ let selectedMonth = null;
 let currentSource = null;
 
 // Tab state
-let tabs = [{ id: 'main', title: 'Home', type: 'main' }];
+let tabs = [
+  { id: 'main', title: 'Home', type: 'main' },
+  { id: 'list', title: 'List', type: 'list' }
+];
 let activeTab = 'main';
 let currentPreviewUrl = '';
 
@@ -82,15 +89,21 @@ domainInput.addEventListener('keypress', (e) => {
   if (e.key === 'Enter') searchDomain();
 });
 
-// Clean domain input
+// Clean domain input (URL parts, www.) and convert unicode domains to punycode,
+// so a domain always maps to the same list row / saved snapshot file
 function cleanDomain(domain) {
-  return domain
+  const host = domain
     .toLowerCase()
     .trim()
     .replace(/^https?:\/\//, '')
     .replace(/^www\./, '')
     .replace(/\/+$/, '')
     .split('/')[0];
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch (error) {
+    return host;
+  }
 }
 
 // Main search function
@@ -101,6 +114,9 @@ async function searchDomain() {
     alert('Please enter a domain');
     return;
   }
+
+  // Results show on Home (the search box is also reachable from List / previews)
+  if (activeTab !== 'main') switchTab('main');
 
   // Abort a search that is still running so its late result can't overwrite this one
   if (currentSearchController) currentSearchController.abort();
@@ -114,43 +130,23 @@ async function searchDomain() {
   startLoadingTimer();
 
   try {
-    const result = await fetchWithFallback(domain, controller.signal);
-    // Cancelled or superseded: cancelFetch() / the newer search owns the UI now
-    if (controller.signal.aborted) return;
+    // Same session: reuse the result instead of hitting the archives again
+    let result = snapshotCache[domain];
+    if (!result) {
+      result = await fetchWithFallback(domain, { signal: controller.signal, onStatus: updateLoadingStatus });
+      // Cancelled or superseded: cancelFetch() / the newer search owns the UI now
+      if (controller.signal.aborted) return;
+      if (result.snapshots.length > 0) snapshotCache[domain] = result;
+      recordCheckResult(domain, result, { addToTop: true });
+    }
     stopLoadingTimer();
-
-    if (!result.snapshots || result.snapshots.length === 0) {
-      showScreen('error');
-      document.getElementById('errorMessage').textContent =
-        `No archived snapshots found for "${domain}"`;
-      setStatus('No snapshots found');
-      return;
-    }
-
-    allSnapshots = result.snapshots;
-    currentSource = result.source;
-    processSnapshots(result.snapshots);
-    displayResults();
-    showScreen('results');
-
-    // Show source indicator in stats bar
-    const sourceInfo = SOURCES[result.source];
-    document.getElementById('sourceIndicator').innerHTML =
-      `<span class="source-indicator ${sourceInfo.short.toLowerCase()}">${sourceInfo.name}</span>`;
-
-    setStatus(`Loaded ${result.snapshots.length} snapshots from ${sourceInfo.name}`);
-
-    // Hit the request limit: there are more snapshots than shown
-    if (result.snapshots.length >= SNAPSHOT_LIMIT) {
-      document.getElementById('totalSnapshots').textContent =
-        `${result.snapshots.length.toLocaleString()}+`;
-      setStatus(`Loaded ${result.snapshots.length.toLocaleString()} snapshots from ${sourceInfo.name} (limit reached, not all snapshots shown)`);
-    }
+    showDomainResult(domain, result);
 
   } catch (error) {
     if (controller.signal.aborted) return;
     stopLoadingTimer();
     console.error('Error:', error);
+    recordCheckError(domain, error, { addToTop: true });
     showScreen('error');
 
     let errorMsg = `Failed to fetch from all archives. Please try again later. (${error.message})`;
@@ -165,6 +161,41 @@ async function searchDomain() {
   }
 }
 
+// Show a domain's snapshots on the Home tab (after a search, or opened from the List)
+function showDomainResult(domain, result, note = '') {
+  currentDomain = domain;
+
+  if (!result.snapshots || result.snapshots.length === 0) {
+    showScreen('error');
+    document.getElementById('errorMessage').textContent =
+      `No archived snapshots found for "${domain}"`;
+    setStatus('No snapshots found');
+    return;
+  }
+
+  allSnapshots = result.snapshots;
+  currentSource = result.source;
+  processSnapshots(result.snapshots);
+  displayResults();
+  showScreen('results');
+
+  // Show source indicator in stats bar
+  const sourceInfo = SOURCES[result.source];
+  document.getElementById('sourceIndicator').innerHTML =
+    `<span class="source-indicator ${sourceInfo.short.toLowerCase()}">${sourceInfo.name}</span>`;
+
+  let status = `Loaded ${result.snapshots.length.toLocaleString()} snapshots from ${sourceInfo.name}`;
+
+  // Hit the request limit: there are more snapshots than shown
+  if (result.snapshots.length >= SNAPSHOT_LIMIT) {
+    document.getElementById('totalSnapshots').textContent =
+      `${result.snapshots.length.toLocaleString()}+`;
+    status += ' (limit reached, not all snapshots shown)';
+  }
+
+  setStatus(note ? `${status} - ${note}` : status);
+}
+
 // Fetchers per source, same order as SOURCES
 const FETCHERS = {
   wayback: fetchWaybackCDX,
@@ -173,13 +204,10 @@ const FETCHERS = {
 };
 
 // Fallback fetch: Wayback CDX -> Wayback Timemap -> Arquivo.pt
-async function fetchWithFallback(domain, signal) {
-  // Check cache first
-  if (snapshotCache[domain]) {
-    setStatus(`Loaded from cache (${snapshotCache[domain].snapshots.length} snapshots)`);
-    return snapshotCache[domain];
-  }
-
+// ctx: { signal, onStatus(source, status, detail) } — onStatus reports progress
+// (the loading screen for a search, the row note for a List check).
+async function fetchWithFallback(domain, ctx) {
+  const { signal, onStatus } = ctx;
   const failures = [];
   const answeredArchives = new Set(); // archives that answered "no snapshots"
 
@@ -188,21 +216,19 @@ async function fetchWithFallback(domain, signal) {
     // Same index already answered "no snapshots" (e.g. Timemap after CDX)
     if (answeredArchives.has(info.archive)) continue;
 
-    updateLoadingStatus(source, 'loading');
+    onStatus(source, 'loading');
     try {
-      const snapshots = await FETCHERS[source](domain, signal);
+      const snapshots = await FETCHERS[source](domain, ctx);
       if (snapshots.length > 0) {
-        updateLoadingStatus(source, 'success');
-        const result = { snapshots, source };
-        snapshotCache[domain] = result;
-        return result;
+        onStatus(source, 'success');
+        return { snapshots, source };
       }
-      updateLoadingStatus(source, 'empty');
+      onStatus(source, 'empty');
       answeredArchives.add(info.archive);
     } catch (error) {
       if (signal.aborted) throw error;
       console.error(`${info.name} failed:`, error.message);
-      updateLoadingStatus(source, 'failed');
+      onStatus(source, 'failed');
       failures.push({ archive: info.archive, message: `${info.name}: ${error.message}` });
     }
   }
@@ -219,6 +245,7 @@ async function fetchWithFallback(domain, signal) {
 // and the search signal aborts it immediately (Cancel button / new search).
 async function fetchText(url, timeout, signal) {
   if (signal.aborted) throw new Error('Search cancelled');
+  if (proxyState.enabled) return fetchTextViaProxy(url, timeout, signal);
 
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -244,6 +271,43 @@ async function fetchText(url, timeout, signal) {
   }
 }
 
+// Same as fetchText, but through the next rotating proxy (main process does the request).
+// Proxy problems (dead proxy, timeout, rejected login) are marked `network` so the
+// retry goes out through another proxy.
+async function fetchTextViaProxy(url, timeout, signal) {
+  const id = ++proxyRequestId;
+  let abort;
+  // Cancel answers right away; the main process stops the request in the background
+  const cancelled = new Promise((resolve, reject) => {
+    abort = () => {
+      ipcRenderer.send('proxy-fetch-abort', id);
+      reject(new Error('Search cancelled'));
+    };
+  });
+  signal.addEventListener('abort', abort);
+
+  try {
+    const result = await Promise.race([ipcRenderer.invoke('proxy-fetch', { id, url, timeout }), cancelled]);
+    if (signal.aborted) throw new Error('Search cancelled');
+
+    if (result.error || result.status === 407) {
+      const reason = result.error || 'proxy rejected the username/password (407)';
+      const error = new Error(`${reason} (proxy ${result.proxy})`);
+      error.network = true;
+      throw error;
+    }
+    if (result.status < 200 || result.status >= 300) {
+      const error = new Error(`HTTP ${result.status} (proxy ${result.proxy})`);
+      error.status = result.status;
+      error.retryAfter = parseInt(result.retryAfter, 10);
+      throw error;
+    }
+    return result.text;
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 // Wait ms, but stop right away if the search is cancelled
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -261,27 +325,36 @@ function sleep(ms, signal) {
 
 // Fetch with retry on transient errors. Wayback often answers
 // "503 Temporarily Offline" for a moment, so a short wait usually fixes it.
-async function fetchWithRetry(source, url, signal) {
+async function fetchWithRetry(source, url, ctx) {
+  const { signal, onStatus } = ctx;
   const { timeout, retries } = SOURCES[source];
 
   for (let attempt = 0; ; attempt++) {
     try {
       return await fetchText(url, timeout, signal);
     } catch (error) {
-      // HTTP error -> retry on 429/5xx only; no status -> TypeError means the connection failed
+      // HTTP error -> retry on 429/5xx only; no status -> connection failed
+      // (TypeError from fetch, or a proxy error marked `network`)
       const retryable = error.status
         ? RETRYABLE_STATUS.includes(error.status)
-        : error.name === 'TypeError';
+        : error.network || error.name === 'TypeError';
       if (signal.aborted || !retryable || attempt >= retries) throw error;
 
       // Honor Retry-After (capped at 10s), otherwise back off 2s, 4s, ...
       const delay = error.retryAfter > 0
         ? Math.min(error.retryAfter, 10) * 1000
         : 2000 * (attempt + 1);
-      updateLoadingStatus(source, 'retrying', `${error.message}, retry ${attempt + 1}/${retries} in ${delay / 1000}s`);
+      onStatus(source, 'retrying', `${error.message}, retry ${attempt + 1}/${retries} in ${delay / 1000}s`);
       await sleep(delay, signal);
     }
   }
+}
+
+// Page URL of one snapshot in its archive
+function snapshotUrl(source, timestamp, originalUrl) {
+  return source === 'arquivo'
+    ? `https://arquivo.pt/wayback/${timestamp}/${originalUrl}`
+    : `https://web.archive.org/web/${timestamp}/${originalUrl}`;
 }
 
 // Parse Wayback CDX/Timemap JSON (first row = field names) into snapshots
@@ -296,7 +369,7 @@ function parseWaybackRows(data, source) {
   return data.slice(1).map(row => ({
     timestamp: row[tsIdx],
     originalUrl: row[urlIdx],
-    url: `https://web.archive.org/web/${row[tsIdx]}/${row[urlIdx]}`,
+    url: snapshotUrl(source, row[tsIdx], row[urlIdx]),
     statusCode: row[statusIdx] || '200',
     source
   }));
@@ -304,28 +377,28 @@ function parseWaybackRows(data, source) {
 
 // Fetch from Wayback Machine CDX API (primary).
 // Negative limit = newest N snapshots; fl keeps the payload small.
-async function fetchWaybackCDX(domain, signal) {
+async function fetchWaybackCDX(domain, ctx) {
   const url = `https://web.archive.org/cdx/search/cdx?url=${encodeURIComponent(domain)}` +
     `&output=json&fl=timestamp,original,statuscode&limit=-${SNAPSHOT_LIMIT}`;
-  const text = await fetchWithRetry('wayback', url, signal);
+  const text = await fetchWithRetry('wayback', url, ctx);
   return parseWaybackRows(JSON.parse(text || '[]'), 'wayback');
 }
 
 // Fetch from Wayback Timemap API (fallback, different Wayback endpoint).
 // Exact match + limit: without them it returns every URL under the domain (can be 90+ MB).
-async function fetchWaybackTimemap(domain, signal) {
+async function fetchWaybackTimemap(domain, ctx) {
   const url = `https://web.archive.org/web/timemap/json?url=${encodeURIComponent(domain)}` +
     `&matchType=exact&fl=timestamp,original,statuscode&limit=-${SNAPSHOT_LIMIT}`;
-  const text = await fetchWithRetry('timemap', url, signal);
+  const text = await fetchWithRetry('timemap', url, ctx);
   return parseWaybackRows(JSON.parse(text || '[]'), 'timemap');
 }
 
 // Fetch from Arquivo.pt CDX API (fallback, independent archive used when Wayback is down).
 // Free, no API key; coverage of non-.pt sites is smaller than Wayback.
-async function fetchArquivo(domain, signal) {
+async function fetchArquivo(domain, ctx) {
   const url = `https://arquivo.pt/wayback/cdx?url=${encodeURIComponent(domain)}` +
     `&output=json&sort=reverse&limit=${SNAPSHOT_LIMIT}`;
-  const text = await fetchWithRetry('arquivo', url, signal);
+  const text = await fetchWithRetry('arquivo', url, ctx);
 
   // Response is NDJSON: one JSON object per line (empty body = no snapshots)
   return text.split('\n')
@@ -334,7 +407,7 @@ async function fetchArquivo(domain, signal) {
     .map(row => ({
       timestamp: row.timestamp,
       originalUrl: row.url,
-      url: `https://arquivo.pt/wayback/${row.timestamp}/${row.url}`,
+      url: snapshotUrl('arquivo', row.timestamp, row.url),
       statusCode: row.status || '200',
       source: 'arquivo'
     }));
@@ -683,13 +756,23 @@ function switchTab(tabId) {
     t.classList.toggle('active', t.dataset.tab === tabId);
   });
 
+  const listContainer = document.getElementById('listContainer');
+
   if (tabId === 'main') {
     // Show main content
     document.getElementById('previewContainer').style.display = 'none';
+    listContainer.style.display = 'none';
     document.querySelector('.main-content').style.display = 'flex';
-    if (allSnapshots.length > 0) {
+    if (allSnapshots.length > 0 && resultsScreen.style.display !== 'none') {
       document.getElementById('statsBar').style.display = 'flex';
     }
+  } else if (tabId === 'list') {
+    // Show domain list (bulk check + history)
+    document.getElementById('previewContainer').style.display = 'none';
+    document.querySelector('.main-content').style.display = 'none';
+    document.getElementById('statsBar').style.display = 'none';
+    listContainer.style.display = 'flex';
+    renderList();
   } else {
     // Show preview
     const tab = tabs.find(t => t.id === tabId);
@@ -698,6 +781,7 @@ function switchTab(tabId) {
       document.getElementById('previewUrl').textContent = tab.url;
       document.getElementById('previewWebview').src = toRawWaybackUrl(tab.url);
       document.getElementById('previewContainer').style.display = 'flex';
+      listContainer.style.display = 'none';
       document.querySelector('.main-content').style.display = 'none';
       document.getElementById('statsBar').style.display = 'none';
     }
@@ -721,6 +805,8 @@ function renderTabs() {
 
     if (tab.type === 'main') {
       tabEl.innerHTML = `Home`;
+    } else if (tab.type === 'list') {
+      tabEl.innerHTML = `List <span class="tab-badge" id="listTabBadge"></span>`;
     } else {
       tabEl.innerHTML = `
         ${tab.title}
@@ -730,6 +816,8 @@ function renderTabs() {
 
     tabBar.insertBefore(tabEl, closeAllBtn);
   });
+
+  updateListBadge();
 }
 
 // Close single tab
@@ -743,16 +831,17 @@ function closeTab(tabId) {
   renderTabs();
 }
 
-// Close all preview tabs
+// Close all preview tabs (Home and List stay)
 function closeAllTabs() {
-  tabs = tabs.filter(t => t.type === 'main');
-  switchTab('main');
+  const onPreview = tabs.some(t => t.id === activeTab && t.type === 'preview');
+  tabs = tabs.filter(t => t.type !== 'preview');
+  if (onPreview) switchTab('main');
   renderTabs();
 }
 
 // Close current preview
 function closePreview() {
-  if (activeTab !== 'main') {
+  if (tabs.some(t => t.id === activeTab && t.type === 'preview')) {
     closeTab(activeTab);
   }
 }
